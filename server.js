@@ -3,11 +3,11 @@ import express from "express";
 const app = express();
 
 app.get("/", (req, res) => {
-  res.send("IVASMS OTP BOT RUNNING ✅");
+  res.send("🚀 IVASMS ULTRA BOT RUNNING");
 });
 
 export function keepAlive() {
   app.listen(3000, () =>
-    console.log("KeepAlive Server Started")
+    console.log("KeepAlive Started")
   );
 }
