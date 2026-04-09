@@ -14,19 +14,91 @@ const PASSWORD = process.env.IVASMS_PASSWORD;
 const OTP_URL = process.env.OTP_URL;
 
 let browser, page;
+let lastMessage = "";
 
-// telegram sender
-async function sendTelegram(text) {
+/* ========= COUNTRY FLAG AUTO ========= */
+function getCountryFlag(number) {
+  const codes = {
+    "+92": "🇵🇰 Pakistan",
+    "+91": "🇮🇳 India",
+    "+1": "🇺🇸 USA",
+    "+44": "🇬🇧 UK",
+    "+971": "🇦🇪 UAE",
+    "+966": "🇸🇦 Saudi Arabia",
+    "+880": "🇧🇩 Bangladesh",
+    "+62": "🇮🇩 Indonesia",
+    "+33": "🇫🇷 France",
+    "+49": "🇩🇪 Germany",
+    "+81": "🇯🇵 Japan"
+  };
+
+  for (let code in codes)
+    if (number.startsWith(code)) return codes[code];
+
+  return "🌍 Unknown Country";
+}
+
+/* ========= SERVICE DETECTOR ========= */
+function detectService(text) {
+  const services = [
+    "WhatsApp",
+    "Google",
+    "Telegram",
+    "Facebook",
+    "Instagram",
+    "TikTok",
+    "Amazon",
+    "PayPal",
+    "Binance"
+  ];
+
+  for (let s of services)
+    if (text.toLowerCase().includes(s.toLowerCase()))
+      return s;
+
+  return "Unknown Service";
+}
+
+/* ========= TELEGRAM MESSAGE ========= */
+async function sendTelegram(data) {
+  const flag = getCountryFlag(data.number);
+  const service = detectService(data.message);
+
+  const msg = `
+<b>╔═══ 🔐 NEW OTP RECEIVED ═══╗</b>
+
+${flag}
+
+📱 <b>Number:</b>
+<code>${data.number}</code>
+
+🏢 <b>Service:</b> ${service}
+
+🔑 <b>OTP:</b>
+<code>${data.otp}</code>
+
+💬 <b>Full Message:</b>
+<blockquote>${data.message}</blockquote>
+
+<b>Status:</b> ✅ Delivered
+`;
+
   await axios.post(
     `https://api.telegram.org/bot${BOT}/sendMessage`,
     {
       chat_id: GROUP,
-      text
+      parse_mode: "HTML",
+      text: msg,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📋 Copy OTP", callback_data: "copy_" + data.otp }]
+        ]
+      }
     }
   );
 }
 
-// login function
+/* ========= LOGIN ========= */
 async function login() {
   await page.goto("https://www.ivasms.com/login", {
     waitUntil: "networkidle2"
@@ -40,39 +112,38 @@ async function login() {
     page.waitForNavigation()
   ]);
 
-  console.log("Login Success");
-  await sendTelegram("✅ IVASMS Logged In");
+  console.log("✅ Logged In");
 }
 
-// OTP checker
-let lastOTP = "";
-
-async function checkOTP() {
+/* ========= OTP SCANNER ========= */
+async function checkSMS() {
   try {
     await page.goto(OTP_URL, { waitUntil: "networkidle2" });
 
-    const otpText = await page.evaluate(() => {
-      return document.body.innerText;
+    const sms = await page.evaluate(() => {
+      const text = document.body.innerText;
+
+      const otpMatch = text.match(/\b\d{4,8}\b/);
+      const numMatch = text.match(/\+\d{8,15}/);
+
+      return {
+        otp: otpMatch ? otpMatch[0] : null,
+        number: numMatch ? numMatch[0] : "Unknown",
+        message: text.slice(0, 500)
+      };
     });
 
-    // detect 4-8 digit OTP
-    const match = otpText.match(/\b\d{4,8}\b/);
-
-    if (match && match[0] !== lastOTP) {
-      lastOTP = match[0];
-
-      await sendTelegram(
-        `📩 NEW OTP RECEIVED\n\n🔐 OTP: ${lastOTP}`
-      );
-
-      console.log("OTP Sent:", lastOTP);
+    if (sms.otp && sms.message !== lastMessage) {
+      lastMessage = sms.message;
+      await sendTelegram(sms);
+      console.log("✅ OTP Forwarded");
     }
-  } catch (err) {
-    console.log("OTP check error");
+  } catch (e) {
+    console.log("Scan Error");
   }
 }
 
-// start bot
+/* ========= START ========= */
 async function start() {
   browser = await puppeteer.launch({
     headless: true,
@@ -83,11 +154,8 @@ async function start() {
 
   await login();
 
-  // check every 20 sec
-  cron.schedule("*/20 * * * * *", checkOTP);
-
-  // relogin every 30 min
-  cron.schedule("*/30 * * * *", login);
+  cron.schedule("*/15 * * * * *", checkSMS);
+  cron.schedule("*/25 * * * *", login);
 }
 
 start();
